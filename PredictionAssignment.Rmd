@@ -1,0 +1,219 @@
+---
+title: "Prediction Assignment - PML"
+author: "DanFV1"
+date: "4/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Background
+
+Using devices such as *Jawbone Up*, *Nike FuelBand*, and *Fitbit* it is now
+possible to collect a large amount of data about personal activity relatively
+inexpensively.  These type of devices are part of the quantified self movement
+– a group of enthusiasts who take measurements about themselves regularly to
+improve their health, to find patterns in their behavior, or because they are
+tech geeks. One thing that people regularly do is quantify *how much* of a
+particular activity they do, but they rarely quantify *how well they do it*.
+
+# Goal
+
+The goal is to use data from accelerometers on the belt, forearm, arm, and
+dumbell of 6 participants. They were asked to perform barbell lifts correctly
+and incorrectly in 5 different ways.The goal of this project is to predict the
+manner in which they did the exercise. This is the "class" variable in the
+training set, any of the other variables should be used to predict.
+
+# Data
+
+The training data for this project are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data are available here:
+
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+Credits:  
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative
+Activity Recognition of Weight Lifting Exercises. Proceedings of 4th
+International Conference in Cooperation with SIGCHI (Augmented Human ’13) .
+Stuttgart, Germany: ACM SIGCHI, 2013.*
+
+# Data Processing
+
+## Libraries
+
+```{r libraries}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(knitr)
+library(lattice)
+library(ggplot2)
+library(Rcpp)
+library(corrplot)
+
+# Models
+library(gbm)
+library(randomForest)
+```
+
+## Load Data
+
+```{r loaddata, cache=TRUE}
+training <- read.csv("pml-training.csv", header=TRUE)
+testing <- read.csv("pml-testing.csv", header=TRUE)
+dim(training)
+dim(testing)
+```
+
+## Cleaning Data
+
+Removing Variables thar are mostly NA (>95%):
+
+```{r cleaningdata_na, cache = TRUE}
+na_variab <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training_set <- training[ , na_variab == FALSE]
+testing_set <- testing[ , na_variab == FALSE]
+dim(training_set)
+dim(testing_set)
+```
+
+Removing Identification Variables:
+```{r cleaningdata_id, cache = TRUE}
+training_set <- training_set[ , -(1:5)]
+testing_set <- testing_set[ , -(1:5)]
+dim(training_set)
+dim(testing_set)
+```
+Removing the Near Zero Variance Variables:
+
+```{r cleaningdata_nz_var_variab, cache = TRUE}
+nz_var_variab <- nearZeroVar(training_set)
+training_set <- training_set[ , -nz_var_variab]
+testing_set <- testing_set[ , -nz_var_variab]
+dim(training_set)
+dim(testing_set)
+```
+
+## Data Preparation
+
+Randomly split the training data into training data and testing data, with
+70/30 ratio.  
+We will use the initial test data on the trained model to make predictions.
+
+```{r datapreparation, cache = TRUE}
+set.seed(123)
+in_train  <- createDataPartition(training_set$classe, 
+                                 p=0.70, 
+                                 list=FALSE)
+train_set <- training_set[ in_train, ]
+test_set  <- training_set[-in_train, ]
+```
+
+# Choosing a Model
+
+Three methods will be applied to model the regressions (on the train_set) and
+the best one (with the highest accuracy when applied to the test_set) will be
+used for the quiz predictions.  
+  
+The methods are:  
+- Decision Tree  
+- Generalized Expanded Model (GBM)  
+- Random Forests (rf)  
+
+## Decision Tree
+
+```{r decisiontree, cache = TRUE}
+decisiontree_fit <- rpart(classe ~ ., data = train_set, method="class")
+fancyRpartPlot(decisiontree_fit)
+```
+
+Use the test_set to see how accurate the prediction is:
+
+```{r predict_decisiontree, cache = TRUE}
+predict_decisiontree <- predict(decisiontree_fit, 
+                                newdata = test_set, 
+                                type="class")
+confmat_decisiontree <- confusionMatrix(table(predict_decisiontree,
+                                 test_set$classe))
+confmat_decisiontree
+```
+
+## GBM
+```{r gbm, cache = TRUE}
+set.seed(123)
+gbm_control <- trainControl(method = "repeatedcv", 
+                            number = 5, 
+                            repeats = 2)
+
+gbm_fit  <- train(classe ~ ., 
+                  data=train_set, 
+                  method = "gbm", 
+                  trControl = gbm_control, 
+                  verbose = FALSE)
+gbm_fit$finalModel
+print(gbm_fit)
+```
+
+Use the test_set to see how accurate the prediction is:
+
+```{r predict_gbm, cache = TRUE}
+predict_gbm <- predict(gbm_fit,
+                       newdata=test_set)
+
+
+gbm_confmat <- confusionMatrix(factor(predict_gbm), 
+                               factor(test_set$classe))
+
+gbm_confmat
+```
+
+## Random Forest
+
+```{r randomforest, cache = TRUE}
+set.seed(123)
+randforest_control <- trainControl(method="cv", 
+                                   number=3, 
+                                   verboseIter=FALSE)
+
+randforest_fit <- train(classe ~ .,
+                        data=train_set,
+                        method="rf",
+                        trControl=randforest_control)
+
+randforest_fit$finalModel
+```
+
+Use the test_set to see how accurate the prediction is:
+
+```{r predict_randomforest, cache = TRUE}
+randforest_predict <- predict(randforest_fit, 
+                      newdata=test_set)
+
+randforest_confmat <- confusionMatrix(factor(randforest_predict),
+                                      factor(test_set$classe))
+
+randforest_confmat
+```
+
+## Conclusion
+
+When comparing the models above, 
+it is clear that Random Forest is the one with the best results.
+
+Applying Random Forest Model on the initial testing data, we get the following:
+
+```{r predict_testing, cache = TRUE}
+prediction_testing <- predict(randforest_fit, 
+                              newdata=testing_set)
+
+prediction_testing
+```
+
